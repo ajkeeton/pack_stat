@@ -1,5 +1,5 @@
 
-/* pcadamalyzer */
+/* pack_stats */
 
 /* 
 Copyright (C) 2009 Adam Keeton <ajkeeton at gmail>
