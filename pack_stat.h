@@ -18,6 +18,26 @@ struct ipv4_t;
 struct ipv6_t;
 struct tcp_t;
 
+enum protocol_t {
+    PROTO_HTTP,
+    PROTO_SSL,
+    PROTO_SSH,
+    PROTO_OTHER
+};
+
+class session_desc_t {
+public:
+    protocol_t proto;
+    uint64_t 
+        total_bytes,
+        total_client_bytes,
+        total_server_bytes,
+        total_client_tcp_sync_bytes,
+        total_server_tcp_sync_bytes,
+        total_client_tcp_payload_bytes,
+        total_server_tcp_payload_bytes;
+};
+
 class packet_t {
 public:
     const pcap_pkthdr *pkth;
@@ -37,27 +57,7 @@ public:
     uint8_t *tcp_payload;
     uint32_t tcp_payload_size;
 
-    ssn_tbl_key_t tcp_ssn_key;
-};
-
-enum protocol_t {
-    PROTO_HTTP,
-    PROTO_SSL,
-    PROTO_SSH,
-    PROTO_OTHER
-};
-
-class session_desc_t {
-public:
-    protocol_t proto;
-    uint64_t 
-        total_bytes,
-        total_client_bytes,
-        total_server_bytes,
-        total_client_tcp_sync_bytes,
-        total_server_tcp_sync_bytes,
-        total_client_tcp_payload_bytes,
-        total_server_tcp_payload_bytes;
+    session_desc_t *ssn;
 };
 
 //map<ssn_key_t, session_desc_t> session_map;
@@ -103,12 +103,45 @@ struct stats_t {
 
     struct timeval time_start,
         time_end;
+
+    stats_t() { memset(this, 0, sizeof(stats_t)); }
 };
 
 class ps_t {
-    // stats_t
+    ssnt_t *ssns;
+    stats_t stats_global;
+
+    void decode_http(const uint8_t *pkt, 
+                const uint32_t remaining_pkt_len, 
+                packet_t *packet);
+
+    void decode_tcp_payload(const uint8_t *pkt, 
+                const uint32_t remaining_pkt_len, 
+                packet_t *packet);
+
+    void decode_tcp(const uint8_t *pkt, 
+                const uint32_t remaining_pkt_len, 
+                packet_t *packet);
+
+    void decode_udp(const uint8_t *pkt, 
+                const uint32_t remaining_pkt_len, 
+                packet_t *packet);
+
+    void decode_ipv4(const uint8_t *pkt, 
+                 const uint32_t remaining_pkt_len, 
+                 packet_t *packet);
+
+    void decode_ipv6(const uint8_t *pkt, 
+                 const uint32_t remaining_pkt_len, 
+                 packet_t *packet);
+
+    void decode_vlan(const uint8_t *pkt, 
+                 const uint32_t remaining_pkt_len, 
+                 packet_t *packet);
+
 public:
     ps_t();
+    ~ps_t() { ssnt_free(ssns); }
     void dump();
     void add(u_char *user, 
              const struct pcap_pkthdr *pkthdr, 

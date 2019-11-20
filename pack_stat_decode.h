@@ -128,4 +128,3 @@ struct vlan_t {
     uint16_t proto;  /* protocol field... */
 };
 
-

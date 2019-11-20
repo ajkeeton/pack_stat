@@ -8,7 +8,7 @@ Copyright (C) 2009 Adam Keeton <ajkeeton at gmail>
 #include <string>
 #include <map>
 #include <string.h>
-
+using namespace std;
 #include "pack_stat.h"
 
 void pcap_cb(u_char *user, 

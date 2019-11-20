@@ -1,55 +1,40 @@
+#include <string.h>
 #include "pack_stat_decode.h"
 #include "pack_stat.h"
-
-ssn_tbl_t *ssn_tbl_global;
-stats_t stats_global;
 
 session_desc_t *http_alloc_ctx() 
 {
     return (session_desc_t*)calloc(1, sizeof(session_desc_t));
 }
 
-void http_free_ctx(void *h)
+void free_cb(void *h)
 {
-    free(h);
+    delete (session_desc_t*)h;
 }
 
-void decode_http(const uint8_t *pkt, 
+void ps_t::decode_http(const uint8_t *pkt, 
                 const uint32_t remaining_pkt_len, 
                 packet_t *packet)
 {
-    session_desc_t *http;
+}
 
-    if(!(http = (session_desc_t*)ssn_tbl_find(
-                                 ssn_tbl_global, &packet->tcp_ssn_key))) {
-        if(!(http = http_alloc_ctx())) {
-            puts("Couldn't create a tracker for an HTTP session. Out of mem?");
-            return;
-        }
-
-        http->proto = PROTO_HTTP;
-        ssn_tbl_save(ssn_tbl_global, &packet->tcp_ssn_key, http, 
-                      sizeof(session_desc_t), http_free_ctx);
+void ps_t::decode_tcp_payload(const uint8_t *pkt, 
+                const uint32_t remaining_pkt_len, 
+                packet_t *packet)
+{
+    if(!packet->ssn) {
+        // XXX This should not have happened
+        // error()...
+        return;
     }
-
-    http->total_bytes += packet->tcp_payload_size;
-}
-
-void decode_tcp_payload(const uint8_t *pkt, 
-                const uint32_t remaining_pkt_len, 
-                packet_t *packet)
-{
-    session_desc_t *http;
     //printf("%s\n", key_to_string(packet->tcp_ssn_key));
 
     /* Check if this packet is shutting down a TCP session */
     if(!packet->tcp_payload_size) {
         if(packet->tcp->th_flags & TH_FIN || 
            packet->tcp->th_flags & TH_RST) {
-            if((http = (session_desc_t*)
-                    ssn_tbl_find(ssn_tbl_global, &packet->tcp_ssn_key))) {
-                ssn_tbl_clear(ssn_tbl_global, &packet->tcp_ssn_key); 
-            }
+            // XXX Flag something? No need to delete session, it will 
+            // timeout later
             return;
         }
     }
@@ -59,7 +44,7 @@ void decode_tcp_payload(const uint8_t *pkt,
         decode_http(pkt, remaining_pkt_len, packet);
 }
 
-void decode_tcp(const uint8_t *pkt, 
+void ps_t::decode_tcp(const uint8_t *pkt, 
                 const uint32_t remaining_pkt_len, 
                 packet_t *packet)
 {
@@ -92,12 +77,6 @@ void decode_tcp(const uint8_t *pkt,
         return;
     }
 
-    packet->tcp_ssn_key = ssn_tbl_key_t(
-        AF_INET, // <- XXX revisit. hardcoded to ipv4. crashage with ipv6.
-        &packet->ipv4->ip_src, &packet->ipv4->ip_dst,
-        packet->tcp->src_port, packet->tcp->dst_port,
-        packet->vlan ? packet->vlan->pri_cfi_vlan : 0); // <- correct for vlan?
-
     packet->tcp_payload = (uint8_t *)(pkt + hlen);
 
     if(hlen < remaining_pkt_len)
@@ -113,17 +92,28 @@ void decode_tcp(const uint8_t *pkt,
     else
         stats_global.tcp_client_bytes += packet->tcp_payload_size;
 
+    ssnt_key_t key = {
+                packet->ipv4->ip_src, packet->ipv4->ip_dst,
+                packet->tcp->src_port, packet->tcp->dst_port,
+                packet->vlan ? packet->vlan->pri_cfi_vlan : 0 };
+
+    if(!(packet->ssn = (session_desc_t*)ssnt_lookup(ssns, &key))) {
+        packet->ssn = new session_desc_t;
+        // TODO: check return
+        ssnt_insert(ssns, &key, packet->ssn);
+    }
+
     decode_tcp_payload(pkt, remaining_pkt_len, packet);
 }
 
-void decode_udp(const uint8_t *pkt, 
+void ps_t::decode_udp(const uint8_t *pkt, 
                 const uint32_t remaining_pkt_len, 
                 packet_t *packet)
 {
     stats_global.udp++;
 }
 
-void decode_ipv4(const uint8_t *pkt, 
+void ps_t::decode_ipv4(const uint8_t *pkt, 
                  const uint32_t remaining_pkt_len, 
                  packet_t *packet)
 {
@@ -223,7 +213,7 @@ void decode_ipv4(const uint8_t *pkt,
     }
 }
 
-void decode_ipv6(const uint8_t *pkt, 
+void ps_t::decode_ipv6(const uint8_t *pkt, 
                  const uint32_t remaining_pkt_len, 
                  packet_t *packet)
 {
@@ -232,7 +222,7 @@ void decode_ipv6(const uint8_t *pkt,
 
 #define LEN_VLAN_LLC_OTHER (sizeof(vlan_t) + sizeof(eth_llc_t) + sizeof(eth_llc_other_t))
 
-void decode_vlan(const uint8_t *pkt, 
+void ps_t::decode_vlan(const uint8_t *pkt, 
                  const uint32_t remaining_pkt_len, 
                  packet_t *packet)
 {
@@ -443,10 +433,11 @@ void ps_t::dump()
     puts("");
     
     puts("Session cache: ");
-    ssn_tbl_dump();
+    // ssn_tbl_dump();
 
     double time_span = 
         time_to_float(stats_global.time_end) - time_to_float(stats_global.time_start);
+
     printf("\tTime span (as reported in pcap): %f\n", time_span);
     printf("\t\t%.2f kilobytes/s (%.2f kilobits/s)\n", 
         stats_global.total_bytes / time_span / 1024,
@@ -455,5 +446,5 @@ void ps_t::dump()
 
 ps_t::ps_t() {
     memset(&stats_global, 0, sizeof(stats_global));
-    ssn_tbl_global = ssn_tbl_alloc();
+    ssns = ssnt_new_defaults(free_cb);
 }
