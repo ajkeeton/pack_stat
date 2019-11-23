@@ -2,26 +2,64 @@
 #include "pack_stat_decode.h"
 #include "pack_stat.h"
 
-session_desc_t *http_alloc_ctx() 
-{
-    return (session_desc_t*)calloc(1, sizeof(session_desc_t));
-}
-
 void free_cb(void *h)
 {
     delete (session_desc_t*)h;
+}
+
+
+dir_t session_desc_t::get_direction(packet_t *packet) {
+    if(!cport && !cip)
+        return DIR_UNKNOWN;
+    return packet->ipv4->ip_src == cip && 
+           packet->tcp->src_port == cport ? IS_CLIENT : IS_SERVER;
+}
+
+void session_desc_t::handle_new(packet_t *packet, bool use_client) {
+    if(use_client) {
+        cip = packet->ipv4->ip_src;
+        cport = packet->tcp->src_port;
+    } 
+    else {
+        cip = packet->ipv4->ip_dst;
+        cport = packet->tcp->dst_port;
+    }
+}
+
+void session_desc_t::update(packet_t *packet) {
+    // XXX Revisit - handle endianess in tcp.cc
+    packet->tcp->th_seq = ntohl(packet->tcp->th_seq);
+    packet->tcp->th_ack = ntohl(packet->tcp->th_ack);
+    switch(get_direction(packet)) {
+        case IS_CLIENT:
+            client.update(packet);
+            break;
+        case IS_SERVER:
+            server.update(packet);
+            break;
+        default:
+            abort();
+    }
+}
+
+static inline bool has_port(packet_t *packet, uint16_t port) {
+    return ntohs(packet->tcp->src_port) == port || 
+           ntohs(packet->tcp->dst_port) == port;
 }
 
 void ps_t::decode_http(const uint8_t *pkt, 
                 const uint32_t remaining_pkt_len, 
                 packet_t *packet)
 {
+    // http_t *http = packet->tcp_payload;
+    // Extract something useful?
 }
 
 void ps_t::decode_tcp_payload(const uint8_t *pkt, 
                 const uint32_t remaining_pkt_len, 
                 packet_t *packet)
 {
+#if 0
     if(!packet->ssn) {
         // XXX This should not have happened
         // error()...
@@ -39,9 +77,31 @@ void ps_t::decode_tcp_payload(const uint8_t *pkt,
         }
     }
 
-    if(ntohs(packet->tcp->src_port) == 80 ||
-       ntohs(packet->tcp->dst_port) == 80)
+    switch(packet->direction) {
+        case IS_CLIENT:
+            packet->ssn.total_client_bytes += packet->tcp_payload_size;
+            break;
+        case IS_SERVER:
+            packet->ssn.total_server_bytes += packet->tcp_payload_size;
+            break;
+        default
+            packet->ssn.total_unknown_dir_bytes += packet->tcp_payload_size;
+    }
+
+    if(has_port(packet, 80)) {
+        packet->ssn->proto = PROTO_HTTP;
         decode_http(pkt, remaining_pkt_len, packet);
+    }
+    else if(has_port(packet, 443)) {
+        packet->ssn->proto = PROTO_SSL;
+    }
+    else if(has_port(packet, 22)) {
+        packet->ssn->proto = PROTO_SSH;
+    }
+    else {
+        packet->ssn->proto = PROTO_UNKNOWN;
+    }
+#endif
 }
 
 void ps_t::decode_tcp(const uint8_t *pkt, 
@@ -86,12 +146,6 @@ void ps_t::decode_tcp(const uint8_t *pkt,
 
     stats_global.tcp_payload_bytes += packet->tcp_payload_size;
 
-    /* Shortcut. Assuming lower port is server instead of decoding handshakes */
-    if(ntohs(packet->tcp->src_port) < ntohs(packet->tcp->dst_port))
-        stats_global.tcp_server_bytes += packet->tcp_payload_size;
-    else
-        stats_global.tcp_client_bytes += packet->tcp_payload_size;
-
     ssnt_key_t key = {
                 packet->ipv4->ip_src, packet->ipv4->ip_dst,
                 packet->tcp->src_port, packet->tcp->dst_port,
@@ -103,6 +157,47 @@ void ps_t::decode_tcp(const uint8_t *pkt,
         ssnt_insert(ssns, &key, packet->ssn);
     }
 
+    session_desc_t *ssn = packet->ssn;
+
+    // Check if new session
+    if(packet->tcp->th_flags & TH_SYN) {
+        if(!(packet->tcp->th_flags & TH_ACK)) {
+            // No ack. This is the client
+            
+            if(ssn->get_direction(packet) != DIR_UNKNOWN) {
+                // we either guessed at the direction earlier or this is a new syn 
+                // If direction differs, need to swap flows
+                if(ssn->get_direction(packet) == IS_SERVER)
+                    ssn->swap_cli_srv();
+            }
+            else {
+                // TODO: Check if already established and tally stat
+                ssn->handle_new(packet, true);
+            }
+        } else {
+            // Packet has ack. This is the server
+            
+            if(ssn->get_direction(packet) != DIR_UNKNOWN) {
+                // we either guessed at the direction earlier or this is a new syn/ack
+                // If direction differs, need to swap flows
+                if(ssn->get_direction(packet) == IS_CLIENT)
+                    ssn->swap_cli_srv();
+            }
+            else {
+                // TODO: Check if already established and tally stat
+                ssn->handle_new(packet, false);
+            }
+        }
+    }
+    else if(ssn->get_direction(packet) == DIR_UNKNOWN) {
+        // Guess direction based on ports
+        if(packet->tcp->src_port < packet->tcp->dst_port)
+            ssn->handle_new(packet, true);
+        else
+            ssn->handle_new(packet, false);
+    }
+
+    ssn->update(packet);
     decode_tcp_payload(pkt, remaining_pkt_len, packet);
 }
 

@@ -84,5 +84,7 @@ int main(int argc, char **argv)
 
     pcap_stats.dump();
 
+    pcap_close(pcap);
+
     return 0;
 }

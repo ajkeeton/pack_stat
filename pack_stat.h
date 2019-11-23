@@ -4,6 +4,8 @@
 #include <sys/types.h>
 #include <stdlib.h>
 #include <pcap.h>
+#include <string.h>
+#include <list>
 #include "ssn_track.h"
 
 struct ssl_t {
@@ -19,25 +21,43 @@ struct ipv6_t;
 struct tcp_t;
 
 enum protocol_t {
+    PROTO_UNKNOWN,
     PROTO_HTTP,
     PROTO_SSL,
     PROTO_SSH,
     PROTO_OTHER
 };
 
-class session_desc_t {
-public:
-    protocol_t proto;
-    uint64_t 
-        total_bytes,
-        total_client_bytes,
-        total_server_bytes,
-        total_client_tcp_sync_bytes,
-        total_server_tcp_sync_bytes,
-        total_client_tcp_payload_bytes,
-        total_server_tcp_payload_bytes;
+enum directions_t {
+    DIR_UNKNOWN,
+    IS_CLIENT,
+    IS_SERVER
 };
 
+typedef int dir_t;
+
+class tcp_seg_t { 
+public:
+    uint32_t seq,ack,len;
+
+    tcp_seg_t() {
+        seq = ack = len = 0;
+    }
+
+    tcp_seg_t(tcp_t *tcp, uint32_t l);
+
+    tcp_seg_t(uint32_t s, uint32_t a, uint32_t l);
+
+    uint32_t next_seq() {
+        return seq + len;
+    }
+
+    bool operator==(const tcp_seg_t &b) {
+        return seq == b.seq && ack == b.ack && len == b.len;
+    }
+};
+
+class session_desc_t ;
 class packet_t {
 public:
     const pcap_pkthdr *pkth;
@@ -56,11 +76,78 @@ public:
 
     uint8_t *tcp_payload;
     uint32_t tcp_payload_size;
-
+    dir_t direction;
     session_desc_t *ssn;
+
+    packet_t() { 
+        direction = DIR_UNKNOWN;
+        tcp_payload_size = 0;
+        ssn = NULL; 
+    }
 };
 
-//map<ssn_key_t, session_desc_t> session_map;
+class tcp_flow_stats_t {
+public:
+    uint32_t gaps, 
+             overlaps,
+             retrans;
+
+    bool missing_syn;
+
+    tcp_flow_stats_t() {
+        memset(this, 0, sizeof(tcp_flow_stats_t));
+    }
+};
+
+class tcp_flow_t {
+public:
+    bool in_handshake;
+    uint32_t init_seq, next_seq;
+    tcp_flow_stats_t stats;
+    std::list<tcp_seg_t> segs;
+
+    tcp_flow_t() { 
+        in_handshake = true;
+        init_seq = next_seq = 0;
+    }
+    void update(packet_t *packet);
+};
+
+class session_desc_t {
+public:
+    protocol_t proto;
+    uint64_t 
+        // total_bytes,
+        total_unknown_dir_bytes,
+        total_client_bytes,
+        total_server_bytes;
+        /*
+        total_client_tcp_sync_bytes,
+        total_server_tcp_sync_bytes,
+        total_client_tcp_payload_bytes,
+        total_server_tcp_payload_bytes;
+        */
+    uint16_t cport;
+    uint32_t cip;
+
+    tcp_flow_t client, server; // tstate;
+
+    session_desc_t() {
+        cport = 0;
+        cip = 0;
+        proto = PROTO_UNKNOWN;
+        total_unknown_dir_bytes = total_client_bytes = total_server_bytes = 0;
+    }
+
+    dir_t get_direction(packet_t *packet);
+    void handle_new(packet_t *packet, bool use_client);
+    void update(packet_t *packet);
+    void swap_cli_srv() {
+        tcp_flow_t tmp = client;
+        client = server;
+        server = tmp;
+    }
+};
 
 struct stats_t {
     uint64_t 
