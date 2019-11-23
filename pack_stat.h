@@ -88,14 +88,27 @@ public:
 
 class tcp_flow_stats_t {
 public:
-    uint32_t gaps, 
+    uint32_t total,
+             gaps, 
              overlaps,
              retrans;
 
     bool missing_syn;
 
     tcp_flow_stats_t() {
+        clear();
+    }
+
+    void clear() {
         memset(this, 0, sizeof(tcp_flow_stats_t));
+    }
+
+    tcp_flow_stats_t &operator+=(const tcp_flow_stats_t &t) {
+        total += t.total;
+        gaps += t.gaps;
+        overlaps += t.overlaps;
+        retrans += t.retrans;
+        return *this;
     }
 };
 
@@ -103,49 +116,77 @@ class tcp_flow_t {
 public:
     bool in_handshake;
     uint32_t init_seq, next_seq;
-    tcp_flow_stats_t stats;
+    tcp_flow_stats_t *stats;
     std::list<tcp_seg_t> segs;
 
     tcp_flow_t() { 
         in_handshake = true;
         init_seq = next_seq = 0;
     }
+
     void update(packet_t *packet);
+
+    void use_stats(tcp_flow_stats_t *s) {
+        stats = s;
+    }
 };
 
+class ps_t;
 class session_desc_t {
 public:
     protocol_t proto;
+    /*
     uint64_t 
         // total_bytes,
         total_unknown_dir_bytes,
         total_client_bytes,
         total_server_bytes;
-        /*
         total_client_tcp_sync_bytes,
         total_server_tcp_sync_bytes,
         total_client_tcp_payload_bytes,
         total_server_tcp_payload_bytes;
-        */
-    uint16_t cport;
-    uint32_t cip;
+    */
 
-    tcp_flow_t client, server; // tstate;
+    uint32_t cip, dip;
+    uint16_t cport, dport;
+
+    tcp_flow_stats_t client_stats, server_stats;
+    tcp_flow_t client, server;
+
+    time_t update_first, update_last; // timing/age
+
+    ps_t *ps;
+    char description[256];
 
     session_desc_t() {
-        cport = 0;
-        cip = 0;
+        init();
+    }
+
+    session_desc_t(ps_t *p) {
+        init();
+        ps = p;
+    }
+
+    void init() {
+        cport = dport = 0;
+        cip = dip = 0;
+        update_first = update_last = time(NULL); 
         proto = PROTO_UNKNOWN;
-        total_unknown_dir_bytes = total_client_bytes = total_server_bytes = 0;
+        description[0] = 0;
     }
 
     dir_t get_direction(packet_t *packet);
+    char *get_description();
     void handle_new(packet_t *packet, bool use_client);
     void update(packet_t *packet);
     void swap_cli_srv() {
         tcp_flow_t tmp = client;
         client = server;
         server = tmp;
+    }
+    void clear_stats() {
+        client_stats.clear();
+        server_stats.clear();
     }
 };
 
@@ -171,8 +212,6 @@ struct stats_t {
         tcp,
         tcp_bytes,
         tcp_payload_bytes,
-        tcp_client_bytes,
-        tcp_server_bytes,
         udp,
         ip4ip4,
         arp,
@@ -194,9 +233,24 @@ struct stats_t {
     stats_t() { memset(this, 0, sizeof(stats_t)); }
 };
 
+class ps_callbacks_t {
+public:
+    void (*on_stat_update)(packet_t *p, session_desc_t *ssn, void *ctx);
+    void (*on_syn)(packet_t *p, session_desc_t *ssn, void *ctx);
+    void (*on_fin)(packet_t *p, session_desc_t *ssn, void *ctx);
+    void (*on_psh)(packet_t *p, session_desc_t *ssn, void *ctx);
+    void *ctx;
+
+    ps_callbacks_t() : on_stat_update(NULL), on_syn(NULL), on_fin(NULL), on_psh(NULL), ctx(NULL) {}
+    ps_callbacks_t(void *c) : on_stat_update(NULL), on_syn(NULL), on_fin(NULL), on_psh(NULL), ctx(c) {}
+};
+
 class ps_t {
     ssnt_t *ssns;
     stats_t stats_global;
+    tcp_flow_stats_t tcp_client_stats, tcp_server_stats;
+    ps_callbacks_t callbacks;
+    time_t last_update;
 
     void decode_http(const uint8_t *pkt, 
                 const uint32_t remaining_pkt_len, 
@@ -226,11 +280,14 @@ class ps_t {
                  const uint32_t remaining_pkt_len, 
                  packet_t *packet);
 
+    void init();
 public:
     ps_t();
+    ps_t(const ps_callbacks_t &cb);
     ~ps_t() { ssnt_free(ssns); }
     void dump();
     void add(u_char *user, 
              const struct pcap_pkthdr *pkthdr, 
              const u_char *pkt);
+    void add_ssn_stats(session_desc_t *s);
 };

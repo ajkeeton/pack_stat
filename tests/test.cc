@@ -72,7 +72,7 @@ void tcp_basic() {
     assert(tcp.segs.size() == 1);
     assert(tcp.segs.begin()->next_seq() == 2);
 
-    assert(!tcp.stats.gaps && !tcp.stats.overlaps && !tcp.stats.retrans);
+    assert(!tcp.stats->gaps && !tcp.stats->overlaps && !tcp.stats->retrans);
 }
 
 void tcp_forward() {
@@ -101,7 +101,7 @@ void tcp_forward() {
     tcp.update(&pack);
     test.node(5).has_seq(tcph.th_seq).has_length(0);
 
-    assert(!tcp.stats.gaps && !tcp.stats.overlaps && !tcp.stats.retrans);
+    assert(!tcp.stats->gaps && !tcp.stats->overlaps && !tcp.stats->retrans);
 }
 
 void tcp_reverse() {
@@ -128,9 +128,9 @@ void tcp_reverse() {
     tcp.update(&pack);
     test.node(1).has_seq(2).has_length(5);
 
-    assert(tcp.stats.gaps == 2); // Double check this
-    assert(tcp.stats.overlaps == 0);
-    assert(tcp.stats.retrans == 0);
+    assert(tcp.stats->gaps == 2); // Double check this
+    assert(tcp.stats->overlaps == 0);
+    assert(tcp.stats->retrans == 0);
 }
 
 void tcp_semi_rand() {
@@ -162,9 +162,9 @@ void tcp_semi_rand() {
         it++;
     }
 
-    assert(tcp.stats.gaps == 1); // XXX don't think so... revisit
-    assert(tcp.stats.overlaps == 0);
-    assert(tcp.stats.retrans == 0);
+    assert(tcp.stats->gaps == 1); // XXX don't think so... revisit
+    assert(tcp.stats->overlaps == 0);
+    assert(tcp.stats->retrans == 0);
 }
 
 void swap(int *src, int i, int j) {
@@ -202,7 +202,7 @@ void tcp_fuzz() {
         test.node(i).has_seq(i);
     }
 
-    assert(!tcp.stats.overlaps && !tcp.stats.retrans);
+    assert(!tcp.stats->overlaps && !tcp.stats->retrans);
 }
 
 void tcp_overlap() {
@@ -226,7 +226,7 @@ void tcp_overlap() {
     test.node(2).has_seq(4).has_length(5);
     test.node(3).has_seq(7).has_length(5);
 
-    assert(tcp.stats.overlaps == 1);
+    assert(tcp.stats->overlaps == 1);
 }
 
 void tcp_retrans() {
@@ -235,21 +235,21 @@ void tcp_retrans() {
     pack.tcp_payload_size = 5;
     tcp.update(&pack);
     tcp.update(&pack);
-    assert(tcp.stats.retrans == 1);
+    assert(tcp.stats->retrans == 1);
 
     pack.tcp_payload_size = 0;
 
     tcp.update(&pack);
     // Not a retrans since the payload size differs
-    assert(tcp.stats.retrans == 1);
+    assert(tcp.stats->retrans == 1);
     
     // Not a retrans since ack differs
     tcph.th_ack++;
     tcp.update(&pack);
-    assert(tcp.stats.retrans == 1);
+    assert(tcp.stats->retrans == 1);
 
     tcp.update(&pack);
-    assert(tcp.stats.retrans == 2);
+    assert(tcp.stats->retrans == 2);
 }
 
 void tcp_assem() {
@@ -259,7 +259,6 @@ void tcp_assem() {
     tcp_semi_rand();
     tcp_overlap();
     tcp_retrans();
-    tcp_delayed_syn();
 }
 
 int main() {

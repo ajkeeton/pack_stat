@@ -1,12 +1,19 @@
-#include <string.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "pack_stat_decode.h"
 #include "pack_stat.h"
 
-void free_cb(void *h)
+static void free_cb(void *h)
 {
-    delete (session_desc_t*)h;
-}
+    session_desc_t *ssn = (session_desc_t*)h;
 
+    //if(ssn->ps->callbacks.on_stat_update)
+    //    ssn->ps->callbacks.on_stat_update(packet, ssn, callbacks.ctx);
+
+    ssn->ps->add_ssn_stats(ssn); 
+
+    delete ssn;
+}
 
 dir_t session_desc_t::get_direction(packet_t *packet) {
     if(!cport && !cip)
@@ -19,11 +26,20 @@ void session_desc_t::handle_new(packet_t *packet, bool use_client) {
     if(use_client) {
         cip = packet->ipv4->ip_src;
         cport = packet->tcp->src_port;
+
+        dip = packet->ipv4->ip_dst;
+        dport = packet->tcp->dst_port;
     } 
     else {
         cip = packet->ipv4->ip_dst;
         cport = packet->tcp->dst_port;
+
+        dip = packet->ipv4->ip_src;
+        dport = packet->tcp->src_port;
     }
+
+    client.use_stats(&client_stats);
+    server.use_stats(&server_stats);
 }
 
 void session_desc_t::update(packet_t *packet) {
@@ -40,6 +56,19 @@ void session_desc_t::update(packet_t *packet) {
         default:
             abort();
     }
+
+    update_last = time(NULL);
+}
+
+char *session_desc_t::get_description() {
+    if(strlen(description))
+        return description;
+
+    char srcip[128], dstip[128];
+    inet_ntop(AF_INET, (void*)&cip, srcip, sizeof(srcip));
+    inet_ntop(AF_INET, (void*)&dip, dstip, sizeof(dstip));
+    sprintf(description, "%s:%d <-> %s:%d", srcip, cport, dstip, dport);
+    return description;
 }
 
 static inline bool has_port(packet_t *packet, uint16_t port) {
@@ -79,14 +108,15 @@ void ps_t::decode_tcp_payload(const uint8_t *pkt,
 
     switch(packet->direction) {
         case IS_CLIENT:
-            packet->ssn.total_client_bytes += packet->tcp_payload_size;
+            packet->ssn->total_client_bytes += packet->tcp_payload_size;
             break;
         case IS_SERVER:
-            packet->ssn.total_server_bytes += packet->tcp_payload_size;
+            packet->ssn->total_server_bytes += packet->tcp_payload_size;
             break;
-        default
-            packet->ssn.total_unknown_dir_bytes += packet->tcp_payload_size;
+        default:
+            packet->ssn->total_unknown_dir_bytes += packet->tcp_payload_size;
     }
+#endif
 
     if(has_port(packet, 80)) {
         packet->ssn->proto = PROTO_HTTP;
@@ -101,7 +131,6 @@ void ps_t::decode_tcp_payload(const uint8_t *pkt,
     else {
         packet->ssn->proto = PROTO_UNKNOWN;
     }
-#endif
 }
 
 void ps_t::decode_tcp(const uint8_t *pkt, 
@@ -152,7 +181,7 @@ void ps_t::decode_tcp(const uint8_t *pkt,
                 packet->vlan ? packet->vlan->pri_cfi_vlan : 0 };
 
     if(!(packet->ssn = (session_desc_t*)ssnt_lookup(ssns, &key))) {
-        packet->ssn = new session_desc_t;
+        packet->ssn = new session_desc_t(this);
         // TODO: check return
         ssnt_insert(ssns, &key, packet->ssn);
     }
@@ -199,6 +228,23 @@ void ps_t::decode_tcp(const uint8_t *pkt,
 
     ssn->update(packet);
     decode_tcp_payload(pkt, remaining_pkt_len, packet);
+
+    if(callbacks.on_psh && packet->tcp_payload_size) {
+        callbacks.on_psh(packet, ssn, callbacks.ctx);
+    }
+
+    static time_t now = 0;
+    now = time(NULL);
+
+    // Update per second stats only once per second
+    if(now - last_update > 1) {
+        last_update = now;
+        if(callbacks.on_stat_update)
+            callbacks.on_stat_update(packet, ssn, callbacks.ctx);
+
+        add_ssn_stats(ssn);
+        ssn->clear_stats();
+    }
 }
 
 void ps_t::decode_udp(const uint8_t *pkt, 
@@ -500,31 +546,51 @@ static double time_to_float(struct timeval ts)
     return retval;
 }
 
+void ps_t::add_ssn_stats(session_desc_t *ssn) {
+    // h->cip, h->cport, h->dip, h->dport, h->client_stats, h->server_stats);
+    //stats_global.tcp_client_bytes += ssn->client_stats.total;
+    //ssn->client_stats.retrans
+    //ssn->client_stats.gaps
+    //ssn->client_stats.overlaps
+
+    // ssn->client_stats.clear()
+    //stats_global.tcp_server_bytes += ssn->server_stats.total;
+
+    tcp_client_stats += ssn->client_stats;
+    tcp_server_stats += ssn->server_stats;
+}
+
 void ps_t::dump()
 {
     puts("The epic conclusion:");
 
-    printf("\tTotal packets:        %ld\n", stats_global.total);
-    printf("\tTotal bytes:          %ld\n", stats_global.total_bytes);
+    printf("\tTotal packets:        %lu\n", stats_global.total);
+    printf("\tTotal bytes:          %lu\n", stats_global.total_bytes);
     puts("");
-    printf("\tIPv4:                 %ld\n", stats_global.ipv4);
-    printf("\tIPv4 bytes:           %ld\n", stats_global.ipv4_bytes);
-    printf("\tIPv6:                 %ld\n", stats_global.ipv6);
+    printf("\tIPv4 packets:         %lu\n", stats_global.ipv4);
+    printf("\tIPv4 bytes:           %lu\n", stats_global.ipv4_bytes);
+    printf("\tIPv6 packets:         %lu\n", stats_global.ipv6);
     puts("");
-    printf("\tTCP:                  %ld\n", stats_global.tcp);
-    printf("\tTCP bytes:            %ld\n", stats_global.tcp_bytes);
-    printf("\tTCP payload bytes:    %ld\n", stats_global.tcp_payload_bytes);
-    printf("\tTCP client bytes:     %ld\n", stats_global.tcp_client_bytes);
-    printf("\tTCP server bytes:     %ld\n", stats_global.tcp_server_bytes);
+    printf("\tTCP:                  %lu\n", stats_global.tcp);
+    printf("\t   total bytes:       %lu\n", stats_global.tcp_bytes);
+    printf("\t   payload bytes:     %lu\n", stats_global.tcp_payload_bytes);
+    printf("\t   client bytes:      %lu\n", tcp_client_stats.total);
+    printf("\t   server bytes:      %lu\n", tcp_server_stats.total);
+    printf("\t   client retrans:    %lu\n", tcp_client_stats.retrans);
+    printf("\t   server retrans:    %lu\n", tcp_server_stats.retrans);
+    printf("\t   client gaps:       %lu\n", tcp_client_stats.gaps);
+    printf("\t   server gaps:       %lu\n", tcp_server_stats.gaps);
+    printf("\t   client overlaps:   %lu\n", tcp_client_stats.overlaps);
+    printf("\t   server overlaps:   %lu\n", tcp_server_stats.overlaps);
     puts("");
-    printf("\tUDP:                  %ld\n", stats_global.udp);
-    printf("\tVLAN:                 %ld\n", stats_global.vlan);
-    printf("\tARP:                  %ld\n", stats_global.arp);
-    printf("\tIPX:                  %ld\n", stats_global.ipx);
-    printf("\tIPv4 in IPv4:         %ld\n", stats_global.ip4ip4);
-    printf("\tIP Other:             %ld\n", stats_global.other);
-    printf("\tIP fragments:         %ld\n", stats_global.ip_frag);
-    printf("\tPCAP issue:           %ld\n", stats_global.pcap_file_err);
+    printf("\tUDP:                  %lu\n", stats_global.udp);
+    printf("\tVLAN:                 %lu\n", stats_global.vlan);
+    printf("\tARP:                  %lu\n", stats_global.arp);
+    printf("\tIPX:                  %lu\n", stats_global.ipx);
+    printf("\tIPv4 in IPv4:         %lu\n", stats_global.ip4ip4);
+    printf("\tIP Other:             %lu\n", stats_global.other);
+    printf("\tIP fragments:         %lu\n", stats_global.ip_frag);
+    printf("\tPCAP issue:           %lu\n", stats_global.pcap_file_err);
     puts("");
     
     puts("Session cache: ");
@@ -540,6 +606,17 @@ void ps_t::dump()
 }
 
 ps_t::ps_t() {
+    init();
+}
+
+ps_t::ps_t(const ps_callbacks_t &cb) {
+    init();
+    callbacks = cb;
+}
+
+void ps_t::init() {
+    last_update = 0; // time(NULL);
     memset(&stats_global, 0, sizeof(stats_global));
     ssns = ssnt_new_defaults(free_cb);
 }
+

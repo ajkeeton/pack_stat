@@ -17,13 +17,15 @@ tcp_seg_t::tcp_seg_t(uint32_t s, uint32_t a, uint32_t l) {
 void tcp_flow_t::update(packet_t *p) {
     tcp_t *tcp = p->tcp;
     bool in_order = true;
+    stats->total += p->tcp_payload_size;
 
     // XXX Add stat for missing syn
     
     if(in_handshake) {
 
 
-XXX This only works if the top level keeps track or we this level has the flags
+    // XXX Need to track TCP flags
+    // this is just a hack for now
 
 
         init_seq = p->tcp->th_seq;
@@ -61,16 +63,16 @@ XXX This only works if the top level keeps track or we this level has the flags
 
     // Walk backwards and try to find the node "before" this seg 
     for(; it != segs.begin(); it--) {
-        //printf("Current seg: %u, next %u vs new seg: %u \n", it->seq, it->next_seq(), tcp->th_seq);
+        ////printf("Current seg: %u, next %u vs new seg: %u \n", it->seq, it->next_seq(), tcp->th_seq);
         //
         if(tcp->th_seq > it->seq)
             break;
         if(tcp->th_seq == it->seq) {
             if(seg == *it) {
-                printf("\t%u is a retrans\n", tcp->th_seq);
+                //printf("\t%u is a retrans\n", tcp->th_seq);
                 it++;
                 segs.insert(it, seg);
-                stats.retrans++;
+                stats->retrans++;
                 return;
             }
             break;
@@ -79,7 +81,7 @@ XXX This only works if the top level keeps track or we this level has the flags
 
     // Found it
     if(tcp->th_seq == it->next_seq()) {
-        printf("\t%u is in order\n", tcp->th_seq);
+        //printf("\t%u is in order\n", tcp->th_seq);
         it++;
         
         segs.insert(it, seg);
@@ -89,31 +91,31 @@ XXX This only works if the top level keeps track or we this level has the flags
         // Check for overlapping payload (most likely evasion)
         // (New sequence is greater than old sequence, but the payload is smaller)
         if(tcp->th_seq > it->seq && p->tcp_payload_size) {
-            printf("\t%u overlaps!\n", tcp->th_seq);
+            //printf("\t%u overlaps!\n", tcp->th_seq);
             // Overlapping packets!
             // XXX TODO stat
             it++;
             segs.insert(it, seg);
-            stats.overlaps++;
+            stats->overlaps++;
         }
         else {
             if(tcp->th_seq == it->seq) {
-                printf("\t%u has same seg but differs\n", tcp->th_seq);
+                //printf("\t%u has same seg but differs\n", tcp->th_seq);
                 it++;
                 segs.insert(it, seg);
             } else {
-                printf("\t%u is from the past, and we're missing a seg\n", tcp->th_seq);
+                //printf("\t%u is from the past, and we're missing a seg\n", tcp->th_seq);
                 segs.insert(it, seg);
-                stats.gaps++;
+                stats->gaps++;
             }
         }
     }
     else {
         // else: tcp->th_seq > it->next_seq()
-        printf("\t%u goes in middle or after head\n", tcp->th_seq);
+        //printf("\t%u goes in middle or after head\n", tcp->th_seq);
         it++;
         segs.insert(it, seg);
-        stats.gaps++;
+        stats->gaps++;
     }
 }
 

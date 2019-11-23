@@ -6,7 +6,7 @@ link_directories(${CMAKE_SOURCE_DIR}/ssn_track)
 add_subdirectory(ssn_track) 
 add_subdirectory(tests) 
 add_executable(pack_stat pack_stat.cc pcap_stat_decode.cc tcp.cc)
-target_link_libraries(pack_stat pcap ssn_track)
+target_link_libraries(pack_stat pcap ssn_track ncurses)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++11")
 

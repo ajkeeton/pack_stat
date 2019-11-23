@@ -8,8 +8,79 @@ Copyright (C) 2009 Adam Keeton <ajkeeton at gmail>
 #include <string>
 #include <map>
 #include <string.h>
+#include <unistd.h>
+#include <ncurses.h>
+#include <map>
 using namespace std;
 #include "pack_stat.h"
+#include "pack_stat_decode.h"
+
+static void free_cb(void *f) { delete (float*)f; }
+#define UPDATE_DELAY 100 // ms
+class display_t {
+    time_t last_update;
+    map<float, session_desc_t> ssn_stats;
+    ssnt_t *ssns;
+public:
+    display_t() {
+        // init ncurses
+//        initscr();
+        last_update = 0;
+        ssns = ssnt_new_defaults(free_cb);
+    }
+    ~display_t() {
+//        endwin();
+        ssnt_free(ssns);
+    }
+    void update(packet_t *p, session_desc_t *ssn) {
+        ssnt_key_t ssn_key = {
+                p->ipv4->ip_src, p->ipv4->ip_dst,
+                p->tcp->src_port, p->tcp->dst_port,
+                p->vlan ? p->vlan->pri_cfi_vlan : 0 };
+
+        float *val = (float*)ssnt_lookup(ssns, &ssn_key);
+        if(val) {
+            auto it = ssn_stats.find(*val);
+            ssn_stats.erase(*val);
+        }
+        float key = (ssn->client_stats.total + ssn->server_stats.total) / 1024.0;
+        ssn_stats[key] = *ssn;
+        return;
+        if(!val)
+            val = new float;
+        *val = key;
+
+        ssnt_insert(ssns, &ssn_key, val);
+    }
+
+    void draw() {
+//        printw("hey");
+        // ncurses
+        auto it = ssn_stats.end();
+        do {
+            if(it->first > 0.001) {
+                session_desc_t &sd = it->second;
+                printf("%s\t%.3f kbs\tretrans: %lu\tgaps: %lu\toverlaps: %lu\n", 
+                    sd.get_description(), it->first, 
+                    sd.client_stats.retrans + sd.server_stats.retrans, 
+                    sd.client_stats.gaps + sd.server_stats.gaps, 
+                    sd.client_stats.overlaps + sd.server_stats.overlaps);
+            }
+
+            if(it == ssn_stats.begin())
+                break;
+            it--; 
+        } while(true);
+        
+        puts("==================================\n");
+//        refresh();
+//        usleep(2000000);
+    }
+};
+
+// ncurses wrapper
+// intentionally global
+static display_t display;
 
 void pcap_cb(u_char *user, 
              const struct pcap_pkthdr *pkthdr, 
@@ -24,6 +95,12 @@ void usage()
     puts("packstats <option> <input> [bpf]\n");
     puts("  -r  Read from pcap");
     puts("  -i  Read from NIC\n");
+}
+
+void on_stat_cb(packet_t *packet, session_desc_t *ssn, void *ctx) {
+    display_t *d = (display_t*)ctx;
+    d->update(packet, ssn);
+    d->draw();
 }
 
 int main(int argc, char **argv) 
@@ -43,8 +120,8 @@ int main(int argc, char **argv)
         }
     } 
     else if(!strcmp(argv[1], "-i")) { 
-        if(!(pcap = pcap_create(argv[2], errbuf))) {
-            printf("Error opening NIC: %s\n", pcap_geterr(pcap));
+        if(!(pcap = pcap_open_live(argv[2], 20000, 1, 1000, errbuf))) {
+            printf("Error opening NIC %s: %s\n", argv[2], errbuf);
             return -1;
         }
     }
@@ -54,6 +131,17 @@ int main(int argc, char **argv)
     for(int i=3; i<argc; i++) {
         bpfstring += argv[i];
         bpfstring += " ";
+    }
+
+    int datalink = pcap_datalink(pcap);
+
+    if(datalink < 0) {
+        printf("Invalid datalink: %s\n", pcap_geterr(pcap));
+        return -1;
+    }
+    else if(datalink != DLT_EN10MB) {
+        printf("Wrong datalink: %d\n", datalink);
+        return -1;
     }
 
     if(bpfstring.size()) {
@@ -75,7 +163,10 @@ int main(int argc, char **argv)
         pcap_freecode(&bpf);
     }
 
-    ps_t pcap_stats;
+    ps_callbacks_t callbacks;
+    callbacks.on_stat_update = on_stat_cb;
+    callbacks.ctx = (void*)&display;
+    ps_t pcap_stats(callbacks);
 
     if(pcap_loop(pcap, -1, pcap_cb, (u_char*)&pcap_stats) == -1) {
         printf("Error while looping @ %d: %s\n", __LINE__, pcap_geterr(pcap));
