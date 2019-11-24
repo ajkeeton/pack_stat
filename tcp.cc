@@ -58,7 +58,7 @@ void tcp_flow_t::update(packet_t *p) {
 #endif
 
     tcp_seg_t seg = tcp_seg_t(tcp, p->tcp_payload_size);
-    auto it=segs.end();
+    list<tcp_seg_t>::iterator it = segs.end();
     it--;
 
     // Walk backwards and try to find the node "before" this seg 

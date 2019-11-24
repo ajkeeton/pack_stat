@@ -7,8 +7,8 @@ static void free_cb(void *h)
 {
     session_desc_t *ssn = (session_desc_t*)h;
 
-    //if(ssn->ps->callbacks.on_stat_update)
-    //    ssn->ps->callbacks.on_stat_update(packet, ssn, callbacks.ctx);
+    //if(ssn->ps->callbacks.on_session_free)
+    //    ssn->ps->callbacks.on_session_free(packet, ssn, callbacks.ctx);
 
     ssn->ps->add_ssn_stats(ssn); 
 
@@ -547,15 +547,6 @@ static double time_to_float(struct timeval ts)
 }
 
 void ps_t::add_ssn_stats(session_desc_t *ssn) {
-    // h->cip, h->cport, h->dip, h->dport, h->client_stats, h->server_stats);
-    //stats_global.tcp_client_bytes += ssn->client_stats.total;
-    //ssn->client_stats.retrans
-    //ssn->client_stats.gaps
-    //ssn->client_stats.overlaps
-
-    // ssn->client_stats.clear()
-    //stats_global.tcp_server_bytes += ssn->server_stats.total;
-
     tcp_client_stats += ssn->client_stats;
     tcp_server_stats += ssn->server_stats;
 }
@@ -590,6 +581,9 @@ void ps_t::dump()
     printf("\tIPv4 in IPv4:         %lu\n", stats_global.ip4ip4);
     printf("\tIP Other:             %lu\n", stats_global.other);
     printf("\tIP fragments:         %lu\n", stats_global.ip_frag);
+    printf("\tMPLS Multicast:       %lu\n", stats_global.multicast);
+    printf("\tMPLS Unicast:         %lu\n", stats_global.unicast);
+    printf("\tOther, ignored:       %lu\n", stats_global.other_eth);
     printf("\tPCAP issue:           %lu\n", stats_global.pcap_file_err);
     puts("");
     

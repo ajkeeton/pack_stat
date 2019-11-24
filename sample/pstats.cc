@@ -5,6 +5,7 @@
 Copyright (C) 2009 Adam Keeton <ajkeeton at gmail>
 */
 
+#include <signal.h>
 #include <string>
 #include <map>
 #include <string.h>
@@ -15,7 +16,10 @@ using namespace std;
 #include "pack_stat.h"
 #include "pack_stat_decode.h"
 
+static bool sig_dump_stats = false;
+
 static void free_cb(void *f) { delete (float*)f; }
+
 #define UPDATE_DELAY 100 // ms
 class display_t {
     time_t last_update;
@@ -103,8 +107,14 @@ void on_stat_cb(packet_t *packet, session_desc_t *ssn, void *ctx) {
     d->draw();
 }
 
+void usr1handler(int s) {
+    sig_dump_stats = true;
+}
+
 int main(int argc, char **argv) 
 {
+    signal(SIGUSR1, usr1handler);
+
     char errbuf[PCAP_ERRBUF_SIZE];
     if(argc < 3) {
         usage();
@@ -113,14 +123,16 @@ int main(int argc, char **argv)
 
     pcap_t *pcap = NULL;
 
+    bool is_offline = false;
     if(!strcmp(argv[1], "-r")) { 
         if(!(pcap = pcap_open_offline(argv[2], errbuf))) {
-            printf("Error opening pcap file: %s\n", pcap_geterr(pcap));
+            printf("Error opening pcap file: %s\n", errbuf);
             return -1;
         }
+        is_offline = true;
     } 
     else if(!strcmp(argv[1], "-i")) { 
-        if(!(pcap = pcap_open_live(argv[2], 20000, 1, 1000, errbuf))) {
+        if(!(pcap = pcap_open_live(argv[2], 20000, 1, 100, errbuf))) {
             printf("Error opening NIC %s: %s\n", argv[2], errbuf);
             return -1;
         }
@@ -168,7 +180,19 @@ int main(int argc, char **argv)
     callbacks.ctx = (void*)&display;
     ps_t pcap_stats(callbacks);
 
-    if(pcap_loop(pcap, -1, pcap_cb, (u_char*)&pcap_stats) == -1) {
+    int res = 0;
+    while((res = pcap_dispatch(pcap, -1, pcap_cb, (u_char*)&pcap_stats)) >= 0) {
+        if(res == 0) { // timeout
+            if(sig_dump_stats) {
+                sig_dump_stats = false;
+                pcap_stats.dump();
+            }
+            if(is_offline)
+                break;
+        }
+    }
+
+    if(res < 0) {
         printf("Error while looping @ %d: %s\n", __LINE__, pcap_geterr(pcap));
         return -1;
     }

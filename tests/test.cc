@@ -59,7 +59,9 @@ void init_tcp_test(tcp_flow_t &tcp, packet_t &pack, tcp_t &tcph) {
 
 #define TCP_TEST_SETUP \
     printf("%s\n", __func__); \
+    tcp_flow_stats_t flow_stats; \
     tcp_flow_t tcp; \
+    tcp.stats = &flow_stats; \
     packet_t pack; \
     tcp_t tcph; \
     init_tcp_test(tcp, pack, tcph); \

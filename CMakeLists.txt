@@ -1,12 +1,12 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.0)
 
-project(pack_stat)
+project(pack_stat VERSION 0.1)
+
 include_directories(${CMAKE_SOURCE_DIR}/ssn_track)
 link_directories(${CMAKE_SOURCE_DIR}/ssn_track)
 add_subdirectory(ssn_track) 
+add_subdirectory(sample) 
 add_subdirectory(tests) 
-add_executable(pack_stat pack_stat.cc pcap_stat_decode.cc tcp.cc)
-target_link_libraries(pack_stat pcap ssn_track ncurses)
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++11")
+add_library(pack_stat pcap_stat_decode.cc tcp.cc)
+target_link_libraries(pack_stat ssn_track ncurses)
 
