@@ -1,6 +1,8 @@
 # packstats
 
-Barebones utility that prints some basic network traffic statistics gathered from a pcap.
+Barebones library that collects some network traffic statistics. Traffic can be read live off the wire or from a pcap
+
+This project is in progress, but functional
 
 # Compiling
 
