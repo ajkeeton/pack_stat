@@ -1,4 +1,4 @@
 
 [submodule "ssn_track"]
 	path = ssn_track
-	url = git@github.com:ajkeeton/net_track.git
+	url = git@github.com:ajkeeton/ssn_track.git
