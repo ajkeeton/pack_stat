@@ -175,15 +175,17 @@ void ps_t::decode_tcp(const uint8_t *pkt,
 
     stats_global.tcp_payload_bytes += packet->tcp_payload_size;
 
-    ssnt_key_t key = {
-                packet->ipv4->ip_src, packet->ipv4->ip_dst,
-                packet->tcp->src_port, packet->tcp->dst_port,
-                packet->vlan ? packet->vlan->pri_cfi_vlan : 0 };
+    bgh_key_t key;
+    key.sip = packet->ipv4->ip_src;
+    key.dip = packet->ipv4->ip_dst;
+    key.sport = packet->tcp->src_port;
+    key.dport = packet->tcp->dst_port;
+    key.vlan = packet->vlan ? packet->vlan->pri_cfi_vlan : 0;
 
-    if(!(packet->ssn = (session_desc_t*)ssnt_lookup(ssns, &key))) {
+    if(!(packet->ssn = (session_desc_t*)bgh_lookup(ssns, &key))) {
         packet->ssn = new session_desc_t(this);
         // TODO: check return
-        ssnt_insert(ssns, &key, packet->ssn);
+        bgh_insert(ssns, &key, packet->ssn);
     }
 
     session_desc_t *ssn = packet->ssn;
@@ -555,36 +557,36 @@ void ps_t::dump()
 {
     puts("The epic conclusion:");
 
-    printf("\tTotal packets:        %lu\n", stats_global.total);
-    printf("\tTotal bytes:          %lu\n", stats_global.total_bytes);
+    printf("\tTotal packets:        %llu\n", stats_global.total);
+    printf("\tTotal bytes:          %llu\n", stats_global.total_bytes);
     puts("");
-    printf("\tIPv4 packets:         %lu\n", stats_global.ipv4);
-    printf("\tIPv4 bytes:           %lu\n", stats_global.ipv4_bytes);
-    printf("\tIPv6 packets:         %lu\n", stats_global.ipv6);
+    printf("\tIPv4 packets:         %llu\n", stats_global.ipv4);
+    printf("\tIPv4 bytes:           %llu\n", stats_global.ipv4_bytes);
+    printf("\tIPv6 packets:         %llu\n", stats_global.ipv6);
     puts("");
-    printf("\tTCP:                  %lu\n", stats_global.tcp);
-    printf("\t   total bytes:       %lu\n", stats_global.tcp_bytes);
-    printf("\t   payload bytes:     %lu\n", stats_global.tcp_payload_bytes);
+    printf("\tTCP:                  %llu\n", stats_global.tcp);
+    printf("\t   total bytes:       %llu\n", stats_global.tcp_bytes);
+    printf("\t   payload bytes:     %llu\n", stats_global.tcp_payload_bytes);
     printf("\t   client bytes:      %lu\n", tcp_client_stats.total);
     printf("\t   server bytes:      %lu\n", tcp_server_stats.total);
     printf("\t   client retrans:    %lu\n", tcp_client_stats.retrans);
     printf("\t   server retrans:    %lu\n", tcp_server_stats.retrans);
     printf("\t   client gaps:       %lu\n", tcp_client_stats.gaps);
     printf("\t   server gaps:       %lu\n", tcp_server_stats.gaps);
-    printf("\t   client overlaps:   %lu\n", tcp_client_stats.overlaps);
-    printf("\t   server overlaps:   %lu\n", tcp_server_stats.overlaps);
+    printf("\t   client overlaps:   %llu\n", tcp_client_stats.overlaps);
+    printf("\t   server overlaps:   %llu\n", tcp_server_stats.overlaps);
     puts("");
-    printf("\tUDP:                  %lu\n", stats_global.udp);
-    printf("\tVLAN:                 %lu\n", stats_global.vlan);
-    printf("\tARP:                  %lu\n", stats_global.arp);
-    printf("\tIPX:                  %lu\n", stats_global.ipx);
-    printf("\tIPv4 in IPv4:         %lu\n", stats_global.ip4ip4);
-    printf("\tIP Other:             %lu\n", stats_global.other);
-    printf("\tIP fragments:         %lu\n", stats_global.ip_frag);
-    printf("\tMPLS Multicast:       %lu\n", stats_global.multicast);
-    printf("\tMPLS Unicast:         %lu\n", stats_global.unicast);
-    printf("\tOther, ignored:       %lu\n", stats_global.other_eth);
-    printf("\tPCAP issue:           %lu\n", stats_global.pcap_file_err);
+    printf("\tUDP:                  %llu\n", stats_global.udp);
+    printf("\tVLAN:                 %llu\n", stats_global.vlan);
+    printf("\tARP:                  %llu\n", stats_global.arp);
+    printf("\tIPX:                  %llu\n", stats_global.ipx);
+    printf("\tIPv4 in IPv4:         %llu\n", stats_global.ip4ip4);
+    printf("\tIP Other:             %llu\n", stats_global.other);
+    printf("\tIP fragments:         %llu\n", stats_global.ip_frag);
+    printf("\tMPLS Multicast:       %llu\n", stats_global.multicast);
+    printf("\tMPLS Unicast:         %llu\n", stats_global.unicast);
+    printf("\tOther, ignored:       %llu\n", stats_global.other_eth);
+    printf("\tPCAP issue:           %llu\n", stats_global.pcap_file_err);
     puts("");
     
     puts("Session cache: ");
@@ -611,6 +613,6 @@ ps_t::ps_t(const ps_callbacks_t &cb) {
 void ps_t::init() {
     last_update = 0; // time(NULL);
     memset(&stats_global, 0, sizeof(stats_global));
-    ssns = ssnt_new_defaults(free_cb);
+    ssns = bgh_new(free_cb);
 }
 

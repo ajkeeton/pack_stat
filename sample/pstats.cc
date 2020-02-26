@@ -24,37 +24,33 @@ static void free_cb(void *f) { delete (float*)f; }
 class display_t {
     time_t last_update;
     map<float, session_desc_t> ssn_stats;
-    ssnt_t *ssns;
+    bgh_t *ssns;
 public:
     display_t() {
         // init ncurses
 //        initscr();
         last_update = 0;
-        ssns = ssnt_new_defaults(free_cb);
+        ssns = bgh_new(free_cb);
     }
     ~display_t() {
 //        endwin();
-        ssnt_free(ssns);
+        bgh_free(ssns);
     }
     void update(packet_t *p, session_desc_t *ssn) {
-        ssnt_key_t ssn_key = {
-                p->ipv4->ip_src, p->ipv4->ip_dst,
-                p->tcp->src_port, p->tcp->dst_port,
-                p->vlan ? p->vlan->pri_cfi_vlan : 0 };
+        bgh_key_t key;
+        key.sip = p->ipv4->ip_src;
+        key.dip = p->ipv4->ip_dst;
+        key.sport = p->tcp->src_port;
+        key.dport = p->tcp->dst_port;
+        key.vlan = p->vlan ? p->vlan->pri_cfi_vlan : 0;
 
-        float *val = (float*)ssnt_lookup(ssns, &ssn_key);
+        float *val = (float*)bgh_lookup(ssns, &key);
         if(val) {
             auto it = ssn_stats.find(*val);
             ssn_stats.erase(*val);
         }
-        float key = (ssn->client_stats.total + ssn->server_stats.total) / 1024.0;
-        ssn_stats[key] = *ssn;
-        return;
-        if(!val)
-            val = new float;
-        *val = key;
-
-        ssnt_insert(ssns, &ssn_key, val);
+        float t = (ssn->client_stats.total + ssn->server_stats.total) / 1024.0;
+        ssn_stats[t] = *ssn;
     }
 
     void draw() {
@@ -64,7 +60,7 @@ public:
         do {
             if(it->first > 0.001) {
                 session_desc_t &sd = it->second;
-                printf("%s\t%.3f kbs\tretrans: %lu\tgaps: %lu\toverlaps: %lu\n", 
+                printf("%s\t%.3f kbs\tretrans: %u\tgaps: %u\toverlaps: %u\n", 
                     sd.get_description(), it->first, 
                     sd.client_stats.retrans + sd.server_stats.retrans, 
                     sd.client_stats.gaps + sd.server_stats.gaps, 

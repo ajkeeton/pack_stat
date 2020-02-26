@@ -6,7 +6,7 @@
 #include <pcap.h>
 #include <string.h>
 #include <list>
-#include "ssn_track.h"
+#include "bgh.h"
 
 struct ssl_t {
 
@@ -246,7 +246,7 @@ public:
 };
 
 class ps_t {
-    ssnt_t *ssns;
+    bgh_t *ssns;
     stats_t stats_global;
     tcp_flow_stats_t tcp_client_stats, tcp_server_stats;
     ps_callbacks_t callbacks;
@@ -284,7 +284,7 @@ class ps_t {
 public:
     ps_t();
     ps_t(const ps_callbacks_t &cb);
-    ~ps_t() { ssnt_free(ssns); }
+    ~ps_t() { bgh_free(ssns); }
     void dump();
     void add(u_char *user, 
              const struct pcap_pkthdr *pkthdr, 
